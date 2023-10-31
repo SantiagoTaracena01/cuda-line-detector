@@ -73,7 +73,7 @@ void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
 __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin)
 {
   //TODO calcular: int gloID = ?
-  int gloID = w * h + 1; //TODO
+  int gloID = threadIdx.x + blockIdx.x * blockDim.x;
   if (gloID > w * h) return;      // in case of extra threads in block
 
   int xCent = w / 2;
@@ -105,11 +105,8 @@ __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float
 }
 
 //*****************************************************************
-int main (int argc, char **argv)
-{
-  int i;
-
-  PGMImage inImg (argv[1]);
+int main (int argc, char **argv) {
+  PGMImage inImg(argv[1]);
 
   int *cpuht;
   int w = inImg.x_dim;
@@ -118,8 +115,8 @@ int main (int argc, char **argv)
   float* d_Cos;
   float* d_Sin;
 
-  cudaMalloc ((void **) &d_Cos, sizeof (float) * degreeBins);
-  cudaMalloc ((void **) &d_Sin, sizeof (float) * degreeBins);
+  cudaMalloc((void**) &d_Cos, sizeof(float)* degreeBins);
+  cudaMalloc((void**) &d_Sin, sizeof(float)* degreeBins);
 
   // CPU calculation
   CPU_HoughTran(inImg.pixels, w, h, &cpuht);
@@ -128,19 +125,19 @@ int main (int argc, char **argv)
   float *pcCos = (float *) malloc (sizeof (float) * degreeBins);
   float *pcSin = (float *) malloc (sizeof (float) * degreeBins);
   float rad = 0;
-  for (i = 0; i < degreeBins; i++)
-  {
-    pcCos[i] = cos (rad);
-    pcSin[i] = sin (rad);
+
+  for (int i = 0; i < degreeBins; i++) {
+    pcCos[i] = cos(rad);
+    pcSin[i] = sin(rad);
     rad += radInc;
   }
 
-  float rMax = sqrt (1.0 * w * w + 1.0 * h * h) / 2;
+  float rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2;
   float rScale = 2 * rMax / rBins;
 
   // TODO eventualmente volver memoria global
-  cudaMemcpy(d_Cos, pcCos, sizeof (float) * degreeBins, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_Sin, pcSin, sizeof (float) * degreeBins, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_Cos, pcCos, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_Sin, pcSin, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
 
   // setup and copy data from host to device
   unsigned char *d_in, *h_in;
@@ -148,12 +145,12 @@ int main (int argc, char **argv)
 
   h_in = inImg.pixels; // h_in contiene los pixeles de la imagen
 
-  h_hough = (int *) malloc (degreeBins * rBins * sizeof (int));
+  h_hough = (int*) malloc(degreeBins * rBins * sizeof(int));
 
-  cudaMalloc ((void **) &d_in, sizeof (unsigned char) * w * h);
-  cudaMalloc ((void **) &d_hough, sizeof (int) * degreeBins * rBins);
-  cudaMemcpy (d_in, h_in, sizeof (unsigned char) * w * h, cudaMemcpyHostToDevice);
-  cudaMemset (d_hough, 0, sizeof (int) * degreeBins * rBins);
+  cudaMalloc ((void **) &d_in, sizeof(unsigned char) * w * h);
+  cudaMalloc ((void **) &d_hough, sizeof(int) * degreeBins * rBins);
+  cudaMemcpy (d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
+  cudaMemset (d_hough, 0, sizeof(int) * degreeBins * rBins);
 
   // execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
   //1 thread por pixel
@@ -164,7 +161,7 @@ int main (int argc, char **argv)
   cudaMemcpy (h_hough, d_hough, sizeof (int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
 
   // compare CPU and GPU results
-  for (i = 0; i < degreeBins * rBins; i++) {
+  for (int i = 0; i < degreeBins * rBins; i++) {
     if (cpuht[i] != h_hough[i]) {
       printf ("Calculation mismatch at : %i %i %i\n", i, cpuht[i], h_hough[i]);
     }
@@ -172,7 +169,17 @@ int main (int argc, char **argv)
 
   printf("Done!\n");
 
-  // TODO clean-up
+  // Liberar memoria asignada en la GPU
+  cudaFree(d_in);
+  cudaFree(d_hough);
+  cudaFree(d_Cos);
+  cudaFree(d_Sin);
+
+  // Liberar memoria asignada en el host
+  free(h_hough);
+
+  // Liberar memoria asignada en la función CPU_HoughTran
+  delete[] cpuht;
 
   return 0;
 }
