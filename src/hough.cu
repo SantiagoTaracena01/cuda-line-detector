@@ -142,46 +142,54 @@ int main (int argc, char **argv) {
     rad += radInc;
   }
 
+  // Obtención de los valores de r máximos para la versión de CUDA de la transformada.
   float rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2;
   float rScale = ((2 * rMax) / rBins);
 
+  // Copia de memoria de las matrices a utilizar.
   cudaMemcpy(d_Cos, pcCos, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
   cudaMemcpy(d_Sin, pcSin, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
 
+  // Instancia de los valores a pasar a la versión paralela.
   unsigned char *d_in, *h_in;
   int *d_hough, *h_hough;
 
+  // Obtención de los pixeles de la imagen.
   h_in = inImg.pixels;
 
+  // Alocación de memoria para el procedimiento.
   h_hough = (int*) malloc(degreeBins * rBins * sizeof(int));
 
-  cudaMalloc ((void **) &d_in, sizeof(unsigned char) * w * h);
-  cudaMalloc ((void **) &d_hough, sizeof(int) * degreeBins * rBins);
-  cudaMemcpy (d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
-  cudaMemset (d_hough, 0, sizeof(int) * degreeBins * rBins);
+  // Alocación de memoria en la GPU para las variables a usar.
+  cudaMalloc((void **) &d_in, (sizeof(unsigned char) * w * h));
+  cudaMalloc((void **) &d_hough, (sizeof(int) * degreeBins * rBins));
+  cudaMemcpy(d_in, h_in, (sizeof(unsigned char) * w * h), cudaMemcpyHostToDevice);
+  cudaMemset(d_hough, 0, (sizeof(int) * degreeBins * rBins));
 
-  int blockNum = ceil (w * h / 256);
+  int blockNum = ceil((w * h) / 256);
 
+  // Instancia de los eventos y el tiempo transcurrido.
   cudaEvent_t start, stop;
   float elapsedTime;
 
-  // Crear eventos CUDA
+  // Crear eventos CUDA.
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
-  // Marcar el evento de inicio
+  // Marcar el evento de inicio.
   cudaEventRecord(start, 0);
 
-  GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+  // Llamada al kernel del programa.
+  GPU_HoughTran<<<blockNum, 256>>>(d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
 
-  // Marcar el evento de finalización
+  // Marcar el evento de finalización.
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
 
-  // Calcular el tiempo transcurrido
+  // Calcular el tiempo transcurrido.
   cudaEventElapsedTime(&elapsedTime, start, stop);
 
-  // Imprimir el tiempo transcurrido
+  // Imprimir el tiempo transcurrido.
   printf("Tiempo de ejecución del kernel: %f ms\n", elapsedTime);
 
   cudaMemcpy (h_hough, d_hough, sizeof (int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
@@ -192,16 +200,21 @@ int main (int argc, char **argv) {
     }
   }
 
+  // Impresión de un mensaje de finalización.
   printf("Done!\n");
 
+  // Liberación de memoria en la GPU.
   cudaFree(d_in);
   cudaFree(d_hough);
   cudaFree(d_Cos);
   cudaFree(d_Sin);
 
+  // Liberación del espacio utilizado para el proceso.
   free(h_hough);
 
+  // Liberación de memoria en el CPU.
   delete[] cpuht;
 
+  // Retorno correcto del programa.
   return 0;
 }
