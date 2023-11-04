@@ -166,6 +166,7 @@ int main (int argc, char **argv) {
   cudaMemcpy(d_in, h_in, (sizeof(unsigned char) * w * h), cudaMemcpyHostToDevice);
   cudaMemset(d_hough, 0, (sizeof(int) * degreeBins * rBins));
 
+  // Cálculod el número de bloques a utilizar.
   int blockNum = ceil((w * h) / 256);
 
   // Instancia de los eventos y el tiempo transcurrido.
@@ -192,11 +193,13 @@ int main (int argc, char **argv) {
   // Imprimir el tiempo transcurrido.
   printf("Tiempo de ejecución del kernel: %f ms\n", elapsedTime);
 
-  cudaMemcpy (h_hough, d_hough, sizeof (int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
+  // Copia de regreso de los resultados calculados por el GPU.
+  cudaMemcpy(h_hough, d_hough, (sizeof(int) * degreeBins * rBins), cudaMemcpyDeviceToHost);
 
-  for (int i = 0; i < degreeBins * rBins; i++) {
+  // Impresión de los valores que difieren entre CPU y GPU.
+  for (int i = 0; i < (degreeBins * rBins); i++) {
     if (cpuht[i] != h_hough[i]) {
-      printf ("Calculation mismatch at: %i %i %i\n", i, cpuht[i], h_hough[i]);
+      printf("Calculation mismatch at: %i %i %i\n", i, cpuht[i], h_hough[i]);
     }
   }
 
