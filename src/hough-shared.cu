@@ -25,10 +25,6 @@ const int degreeBins = (180 / degreeInc);
 const int rBins = 100;
 const float radInc = ((degreeInc * M_PI) / 180);
 
-// Declaración de variables en memoria constante.
-__constant__ float d_Cos[degreeBins];
-__constant__ float d_Sin[degreeBins];
-
 // Función CPU_HoughTran, que calcula la transformada de Hough de forma secuencial.
 void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc) {
 
@@ -79,8 +75,12 @@ void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc) {
   }
 }
 
+// Declaración de variables en memoria constante.
+__constant__ float d_Cos[degreeBins];
+__constant__ float d_Sin[degreeBins];
+
 // Kernel del programa utilizado para paralelizar el proceso de cálculo de la transformada.
-__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin) {
+__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float rMax, float rScale) {
 
   // Cálculo y verificación de que el ID sea válido.
   int localID = threadIdx.x;
@@ -228,13 +228,13 @@ int main(int argc, char **argv) {
   int w = inImg.x_dim;
   int h = inImg.y_dim;
 
-  // Instancia de d_Cos y d_Sin a utiliizar.
-  float* d_Cos;
-  float* d_Sin;
+  // // Instancia de d_Cos y d_Sin a utiliizar.
+  // float* d_Cos;
+  // float* d_Sin;
 
-  // Alocación de memoria en la GPU.
-  cudaMalloc((void**) &d_Cos, sizeof(float)* degreeBins);
-  cudaMalloc((void**) &d_Sin, sizeof(float)* degreeBins);
+  // // Alocación de memoria en la GPU.
+  // cudaMalloc((void**) &d_Cos, sizeof(float)* degreeBins);
+  // cudaMalloc((void**) &d_Sin, sizeof(float)* degreeBins);
 
   // Llamada a la versión secuencial del cálculo de la transformada de Hough.
   CPU_HoughTran(inImg.pixels, w, h, &cpuht);
@@ -294,7 +294,7 @@ int main(int argc, char **argv) {
   cudaEventRecord(start, 0);
 
   // Llamada al kernel del programa.
-  GPU_HoughTran<<<blockNum, 256>>>(d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+  GPU_HoughTran<<<blockNum, 256>>>(d_in, w, h, d_hough, rMax, rScale);
 
   // Marcar el evento de finalización.
   cudaEventRecord(stop, 0);
