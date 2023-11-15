@@ -25,6 +25,10 @@ const int degreeBins = (180 / degreeInc);
 const int rBins = 100;
 const float radInc = ((degreeInc * M_PI) / 180);
 
+// Declaración de variables en memoria constante.
+__constant__ float d_Cos[degreeBins];
+__constant__ float d_Sin[degreeBins];
+
 // Función CPU_HoughTran, que calcula la transformada de Hough de forma secuencial.
 void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc) {
 
@@ -79,28 +83,54 @@ void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc) {
 __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin) {
 
   // Cálculo y verificación de que el ID sea válido.
-  int gloID = threadIdx.x + blockIdx.x * blockDim.x;
-  if (gloID > (w * h)) return;
+  int localID = threadIdx.x;
+  int gloID = localID + blockIdx.x * blockDim.x;
 
-  // Cálculo del centro de la imagen.
-  int xCenter = (w / 2);
-  int yCenter = (h / 2);
+  // Instancia de la memoria compartida para el acumulador local.
+  __shared__ int localAcc[(degreeBins * rBins)];
 
-  // Coordenada o pixel a utilizar en el presente kernel.
-  int xCoord = ((gloID % w) - xCenter);
-  int yCoord = (yCenter - (gloID / w));
+  // Ciclo que inicia el acumulador local.
+  for (int i = localID; i < (degreeBins * rBins); i += blockDim.x) {
+    localAcc[i] = 0;
+  }
 
-  // Verificación de que el pixel iterado no sea negro.
-  if (pic[gloID] > 0) {
+  // Sincronización de threads.
+  __syncthreads();
 
-    // Ciclo for que itera en los ángulos a probar por el kernel.
-    for (int tIdx = 0; tIdx < degreeBins; tIdx++) {
+  // Verificación de que el ID global esté dentro de la imagen.
+  if (gloID < (w * h)) {
 
-      // Cálculo del r a probar y adición del resultado.
-      float r = ((xCoord * d_Cos[tIdx]) + (yCoord * d_Sin[tIdx]));
-      int rIdx = ((r + rMax) / rScale);
-      atomicAdd(acc + (rIdx * degreeBins + tIdx), 1);
+    // Cálculo del centro de la imagen.
+    int xCenter = (w / 2);
+    int yCenter = (h / 2);
+
+    // Coordenada o pixel a utilizar en el presente kernel.
+    int xCoord = ((gloID % w) - xCenter);
+    int yCoord = (yCenter - (gloID / w));
+
+    // Verificación de que el pixel iterado no sea negro.
+    if (pic[gloID] > 0) {
+
+      // Ciclo for que itera en los ángulos a probar por el kernel.
+      for (int tIdx = 0; tIdx < degreeBins; tIdx++) {
+
+        // Cálculo del r a probar y adición del resultado.
+        float theta = tIdx * radInc;
+        float r = ((xCoord * d_Cos[tIdx]) + (yCoord * d_Sin[tIdx]));
+        int rIdx = (int)((r + rMax) / rScale);
+        if ((rIdx >= 0) && (rIdx < rBins)) {
+          atomicAdd(acc + (rIdx * degreeBins + tIdx), 1);
+        }
+      }
     }
+  }
+
+  // Sincronización de threads.
+  __syncthreads();
+
+  // Suma final de los valores del acumulador local usando un loop.
+  for (int i = localID; i < (degreeBins * rBins); i += blockDim.x) {
+    atomicAdd(&acc[i], localAcc[i]);
   }
 }
 
@@ -225,9 +255,13 @@ int main(int argc, char **argv) {
   float rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2;
   float rScale = ((2 * rMax) / rBins);
 
-  // Copia de memoria de las matrices a utilizar.
-  cudaMemcpy(d_Cos, pcCos, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_Sin, pcSin, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
+  // Copia de memoria de las matrices a utilizar en memoria constante.
+  cudaMemcpyToSymbol(d_Cos, pcCos, sizeof(float) * degreeBins);
+  cudaMemcpyToSymbol(d_Sin, pcSin, sizeof(float) * degreeBins);
+
+  // // Copia de memoria de las matrices a utilizar.
+  // cudaMemcpy(d_Cos, pcCos, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
+  // cudaMemcpy(d_Sin, pcSin, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
 
   // Instancia de los valores a pasar a la versión paralela.
   unsigned char *d_in, *h_in;
@@ -286,7 +320,7 @@ int main(int argc, char **argv) {
   printf("Tiempo de ejecución del kernel: %f ms\n", elapsedTime);
 
   // Proceso de dibujar la imagen con las líneas halladas.
-  drawAndSaveLines("output.jpg", inImg.pixels, w, h, h_hough, rScale, rMax, threshold);
+  drawAndSaveLines("output-shared.jpg", inImg.pixels, w, h, h_hough, rScale, rMax, threshold);
 
   // Liberación de memoria en la GPU.
   cudaFree(d_in);

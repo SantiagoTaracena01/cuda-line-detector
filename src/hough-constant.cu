@@ -87,12 +87,12 @@ __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float 
   if (gloID > (w * h)) return;
 
   // Cálculo del centro de la imagen.
-  int xCent = (w / 2);
-  int yCent = (h / 2);
+  int xCenter = (w / 2);
+  int yCenter = (h / 2);
 
   // Coordenada o pixel a utilizar en el presente kernel.
-  int xCoord = ((gloID % w) - xCent);
-  int yCoord = (yCent - (gloID / w));
+  int xCoord = ((gloID % w) - xCenter);
+  int yCoord = (yCenter - (gloID / w));
 
   // Verificación de que el pixel iterado no sea negro.
   if (pic[gloID] > 0) {
@@ -109,12 +109,16 @@ __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float 
 }
 
 // Función para dibujar las líneas detectadas en la imagen original y guardarla
-void drawAndSaveLines(const char *outputFileName, unsigned char *originalImage, int w, int h, int *h_hough, float rScale, float rMax, int maxLinesToDraw) {
+void drawAndSaveLines(const char *outputFileName, unsigned char *originalImage, int w, int h, int *h_hough, float rScale, float rMax, int threshold) {
 
   // Instancia de la imagen a crear.
   cv::Mat img(h, w, CV_8UC1, originalImage);
   cv::Mat imgColor;
   cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
+
+  // Cálculo del centro de la imagen.
+  int xCenter = (w / 2);
+  int yCenter = (h / 2);
 
   // Vector que almacena las líneas junto con su peso respectivo.
   std::vector<std::pair<cv::Vec2f, int>>linesWithWeights;
@@ -145,7 +149,7 @@ void drawAndSaveLines(const char *outputFileName, unsigned char *originalImage, 
   );
 
   // Ciclo para dibujar las primeras líneas obtenidas.
-  for (int i = 0; i < std::min(maxLinesToDraw, static_cast<int>(linesWithWeights.size())); i++) {
+  for (int i = 0; i < std::min(threshold, static_cast<int>(linesWithWeights.size())); i++) {
 
     // Valores necesarios para la obtención de la línea.
     cv::Vec2f lineParams = linesWithWeights[i].first;
@@ -157,8 +161,8 @@ void drawAndSaveLines(const char *outputFileName, unsigned char *originalImage, 
     double sinTheta = sin(theta);
 
     // Valores en X y en Y, es decir, punto encontrado.
-    double xValue = (r * cosTheta);
-    double yValue = (r * sinTheta);
+    double xValue = (xCenter - (r * cosTheta));
+    double yValue = (yCenter - (r * sinTheta));
     double alpha = 1000;
 
     // Creación de la línea con OpenCV.
@@ -168,7 +172,7 @@ void drawAndSaveLines(const char *outputFileName, unsigned char *originalImage, 
       cvRound(yValue + (alpha * cosTheta))),
       cv::Point(cvRound(xValue - (alpha * (-sinTheta))),
       cvRound(yValue - (alpha * cosTheta))),
-      cv::Scalar(0, 0, 255),
+      cv::Scalar(255, 0, 0),
       1,
       cv::LINE_AA
     );
@@ -198,25 +202,20 @@ int main(int argc, char **argv) {
   int w = inImg.x_dim;
   int h = inImg.y_dim;
 
-  // // Instancia de d_Cos y d_Sin a utiliizar.
-  // float* d_Cos;
-  // float* d_Sin;
+  // Instancia de d_Cos y d_Sin a utiliizar.
+  float* d_Cos;
+  float* d_Sin;
 
-  // // Alocación de memoria en la GPU.
-  // cudaMalloc((void**) &d_Cos, sizeof(float)* degreeBins);
-  // cudaMalloc((void**) &d_Sin, sizeof(float)* degreeBins);
+  // Alocación de memoria en la GPU.
+  cudaMalloc((void**) &d_Cos, sizeof(float)* degreeBins);
+  cudaMalloc((void**) &d_Sin, sizeof(float)* degreeBins);
 
   // Llamada a la versión secuencial del cálculo de la transformada de Hough.
   CPU_HoughTran(inImg.pixels, w, h, &cpuht);
 
-  // // Obtención de pcCos, pcSin y los radiantes iniciales.
-  // float *pcCos = (float*) malloc(sizeof(float) * degreeBins);
-  // float *pcSin = (float*) malloc(sizeof(float) * degreeBins);
-  // float rad = 0;
-
   // Obtención de pcCos, pcSin y los radiantes iniciales.
-  float pcCos[degreeBins];
-  float pcSin[degreeBins];
+  float *pcCos = (float*) malloc(sizeof(float) * degreeBins);
+  float *pcSin = (float*) malloc(sizeof(float) * degreeBins);
   float rad = 0;
 
   // Ciclo que obtiene el coseno y seno de los radiantes dados hasta llegar al límite.
@@ -229,6 +228,10 @@ int main(int argc, char **argv) {
   // Obtención de los valores de r máximos para la versión de CUDA de la transformada.
   float rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2;
   float rScale = ((2 * rMax) / rBins);
+
+  // Copia de memoria de las matrices a utilizar en memoria constante.
+  cudaMemcpyToSymbol(d_Cos, pcCos, sizeof(float) * degreeBins);
+  cudaMemcpyToSymbol(d_Sin, pcSin, sizeof(float) * degreeBins);
 
   // // Copia de memoria de las matrices a utilizar.
   // cudaMemcpy(d_Cos, pcCos, sizeof(float)* degreeBins, cudaMemcpyHostToDevice);
@@ -291,7 +294,7 @@ int main(int argc, char **argv) {
   printf("Tiempo de ejecución del kernel: %f ms\n", elapsedTime);
 
   // Proceso de dibujar la imagen con las líneas halladas.
-  drawAndSaveLines("output.jpg", inImg.pixels, w, h, h_hough, rScale, rMax, 100);
+  drawAndSaveLines("output-constant.jpg", inImg.pixels, w, h, h_hough, rScale, rMax, threshold);
 
   // Liberación de memoria en la GPU.
   cudaFree(d_in);
