@@ -15,6 +15,8 @@
 #include <math.h>
 #include <cuda.h>
 #include <string.h>
+#include <jpeglib.h>
+#include <vector>
 #include "misc/pgm.h"
 
 // Constantes globales importantes para la transformada de Hough.
@@ -24,7 +26,7 @@ const int rBins = 100;
 const float radInc = ((degreeInc * M_PI) / 180);
 
 // Función CPU_HoughTran, que calcula la transformada de Hough de forma secuencial.
-void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc) {
+void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc) {
 
   // Cálculo del r máximo a utilizar y asignación de memoria.
   float rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2;
@@ -74,7 +76,7 @@ void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc) {
 }
 
 // Kernel del programa utilizado para paralelizar el proceso de cálculo de la transformada.
-__global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin) {
+__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin) {
 
   // Cálculo y verificación de que el ID sea válido.
   int gloID = threadIdx.x + blockIdx.x * blockDim.x;
@@ -102,17 +104,75 @@ __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float
   }
 }
 
+// Función que identifica las líneas obtenidas en la imagen.
+void drawLines(unsigned char *pic, int w, int h, int *acc, int threshold) {
+
+  // Iterar sobre los píxeles de la imagen.
+  for (int i = 0; i < w; i++) {
+    for (int j = 0; j < h; j++) {
+
+      // Cálculo del índice a utilizar.
+      int idx = j * w + i;
+
+      // Verificar si el píxel supera el umbral.
+      if (acc[idx] > threshold) {
+
+        // Dibujar la línea en el píxel.
+        pic[idx] = 255;
+      }
+    }
+  }
+}
+
+// Función que guarda la imagen generada.
+void saveImageWithLines(const char *outputFileName, unsigned char *pic, int w, int h) {
+  struct jpeg_compress_struct cinfo;
+  struct jpeg_error_mgr jerr;
+
+  JSAMPROW row_pointer[1];
+
+  FILE *outfile = fopen(outputFileName, "wb");
+  if (!outfile) {
+    fprintf(stderr, "Error opening output jpeg file %s\n", outputFileName);
+    return;
+  }
+
+  cinfo.err = jpeg_std_error(&jerr);
+  jpeg_create_compress(&cinfo);
+  jpeg_stdio_dest(&cinfo, outfile);
+
+  cinfo.image_width = w;
+  cinfo.image_height = h;
+  cinfo.input_components = 1;
+  cinfo.in_color_space = JCS_GRAYSCALE;
+
+  jpeg_set_defaults(&cinfo);
+  jpeg_start_compress(&cinfo, TRUE);
+
+  while (cinfo.next_scanline < cinfo.image_height) {
+    row_pointer[0] = &pic[cinfo.next_scanline * cinfo.image_width];
+    jpeg_write_scanlines(&cinfo, row_pointer, 1);
+  }
+
+  jpeg_finish_compress(&cinfo);
+  fclose(outfile);
+  jpeg_destroy_compress(&cinfo);
+}
+
 // Función main que se encarga de ejecutar el programa.
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
 
   // Verificación de errores en caso de no pasar una imagen.
-  if (argc < 2) {
-    printf("Usage: ./hough <pgm-image>\n");
+  if (argc < 3) {
+    printf("Usage: ./hough <pgm-image> <threshold>\n");
     return EXIT_FAILURE;
   }
 
   // Carga de la imagen pasada como argumento de consola.
   PGMImage inImg(argv[1]);
+
+  // Carga del threshold a utilizar.
+  int threshold = strtol(argv[2], NULL, 10);
 
   // Obtención del ancho y alto de la imagen.
   int *cpuht;
@@ -195,6 +255,12 @@ int main (int argc, char **argv) {
 
   // Copia de regreso de los resultados calculados por el GPU.
   cudaMemcpy(h_hough, d_hough, (sizeof(int) * degreeBins * rBins), cudaMemcpyDeviceToHost);
+
+  // Dibujo de las líneas encontradas.
+  drawLines(inImg.pixels, w, h, h_hough, threshold);
+
+  // Guardado de la nueva imagen con las líneas encontradas.
+  saveImageWithLines("output.jpg", inImg.pixels, w, h);
 
   // Impresión de los valores que difieren entre CPU y GPU.
   for (int i = 0; i < (degreeBins * rBins); i++) {
