@@ -99,6 +99,11 @@ __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, float 
       // Cálculo del r a probar y adición del resultado.
       float r = ((xCoord * d_Cos[tIdx]) + (yCoord * d_Sin[tIdx]));
       int rIdx = ((r + rMax) / rScale);
+
+      // Barrera para sincronizar los hilos dentro del bloque.
+      __syncthreads();
+
+      // Actualización del acumulador.
       atomicAdd(acc + (rIdx * degreeBins + tIdx), 1);
     }
   }
